@@ -54,11 +54,12 @@ bool deserializeState(JsonObject root)
       uint16_t start = elem["start"] | seg.start;
       int stop = elem["stop"] | -1;
 
+      uint8_t grouping = elem["grp"] | seg.grouping;
       if (stop < 0) {
         uint16_t len = elem["len"];
         stop = (len > 0) ? start + len : seg.stop;
       }
-      strip.setSegment(id, start, stop);
+      strip.setSegment(id, start, stop, grouping);
       
       JsonArray colarr = elem["col"];
       if (!colarr.isNull())
@@ -135,6 +136,7 @@ void serializeSegment(JsonObject& root, WS2812FX::Segment& seg, byte id)
 	root["ix"] = seg.intensity;
 	root["pal"] = seg.palette;
 	root["sel"] = seg.isSelected();
+  root["grp"] = seg.grouping;
 	root["rev"] = seg.getOption(1);
 	root["cln"] = -1;
 }
