@@ -52,15 +52,12 @@ bool deserializeState(JsonObject root)
     {
       WS2812FX::Segment& seg = strip.getSegment(id);
       uint16_t start = elem["start"] | seg.start;
-      int stop = elem["stop"] | -1;
+      int len = elem["len"] | seg.rawLength;
+      uint8_t grouping = max(1, elem["grp"] | seg.grouping);
+      uint8_t disableNLeds = elem["dnl"] | seg.disableNLeds;
 
-      uint8_t grouping = elem["grp"] | seg.grouping;
-      if (stop < 0) {
-        uint16_t len = elem["len"];
-        stop = (len > 0) ? start + len : seg.stop;
-      }
-      strip.setSegment(id, start, stop, grouping);
-      
+      strip.setSegment(id, start, len, grouping, disableNLeds);
+
       JsonArray colarr = elem["col"];
       if (!colarr.isNull())
       {
