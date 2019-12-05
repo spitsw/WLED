@@ -42,10 +42,7 @@ void WS2812FX::init(bool supportWhite, uint16_t countPixels, uint8_t grouping, u
 
   uint8_t ty = 1;
   if (supportWhite) ty =2;
-  _lengthRaw = _length;
-  if (_skipFirstMode) {
-    _lengthRaw += LED_SKIP_AMOUNT;
-  }
+  uint16_t _lengthRaw = _length + (_skipFirstMode ? LED_SKIP_AMOUNT : 0);
 
   bus->Begin((NeoPixelType)ty, _lengthRaw);
   
@@ -54,14 +51,15 @@ void WS2812FX::init(bool supportWhite, uint16_t countPixels, uint8_t grouping, u
   
   _segments[0].start = 0;
   _segments[0].stop = usableLeds();
+  _segments[0].rawLength = _length;
   
   unlockAll();
   setBrightness(_brightness);
 }
 
 uint16_t WS2812FX::usableLeds() {
-  uint16_t totalGroup = _grouping + _disableNLeds;
-  return (_length + totalGroup -1) / totalGroup;
+  uint16_t ledGroup = _grouping + _disableNLeds;
+  return (_length + ledGroup -1) / ledGroup;
 }
 
 void WS2812FX::service() {
@@ -107,6 +105,21 @@ void WS2812FX::setPixelColor(uint16_t n, uint32_t c) {
   setPixelColor(n, r, g, b, w);
 }
 
+uint16_t WS2812FX::realPixelIndex(uint16_t i) {
+    int16_t iGroup = (i - SEGMENT.start) * SEGMENT.ledGroup();
+
+    /* reverse just an individual segment */
+    int16_t realIndex;
+    if IS_REVERSE
+      realIndex = SEGMENT.stop - iGroup -1;
+    else
+      realIndex = SEGMENT.start + iGroup;
+    /* Reverse the whole string */
+    if (reverseMode) realIndex = _length - 1 - realIndex;
+
+    return realIndex;
+}
+
 void WS2812FX::setPixelColor(uint16_t i, byte r, byte g, byte b, byte w)
 {
   if (_locked[i] && !_modeUsesLock) return;
@@ -122,27 +135,16 @@ void WS2812FX::setPixelColor(uint16_t i, byte r, byte g, byte b, byte w)
   }
   if (!_cronixieMode)
   {
-    uint16_t totalGroup = SEGMENT.grouping + _disableNLeds;
-    uint16_t iMax = (SEGMENT.stop - SEGMENT.start) * totalGroup;
-    int16_t iGroup = (i - SEGMENT.start) * totalGroup;
-
-    /* reverse just an individual segment */
-    int16_t realIndex;
-    if IS_REVERSE
-      realIndex = SEGMENT.stop - iGroup -1;
-    else
-      realIndex = SEGMENT.start + iGroup;
-    /* Reverse the whole string */
-    if (reverseMode) realIndex = _length - 1 - realIndex; 
-
     /* Set all the pixels in the group, ensuring _skipFirstMode is honored */
-    { 
-      bool reversed = reverseMode ^ IS_REVERSE;
-      uint16_t skip = _skipFirstMode ? LED_SKIP_AMOUNT : 0;
-      for (uint8_t l = 0; l < totalGroup; l++) {
-        int16_t indexSet = realIndex + (reversed ? -l : l);
-        if (indexSet >= SEGMENT.start && (indexSet < SEGMENT.start + iMax))
-          bus->SetPixelColor(indexSet + skip, l < SEGMENT.grouping ? color : RgbwColor(0, 0, 0, 0));
+    bool reversed = reverseMode ^ IS_REVERSE;
+    uint16_t realIndex = realPixelIndex(i);
+    uint16_t skip = _skipFirstMode ? LED_SKIP_AMOUNT : 0;
+    for (uint16_t l = 0; l < SEGMENT.ledGroup(); l++) {
+      int16_t indexSet = realIndex + (reversed ? -l : l);
+      if (indexSet >= SEGMENT.start && (indexSet < SEGMENT.start + SEGMENT.rawLength))
+        bus->SetPixelColor(indexSet + skip, l < SEGMENT.grouping ? color : RgbwColor(0, 0, 0, 0));
+      for (uint16_t l = 0; indexSet == 0 && l < skip; l++) {// Clear the skipped pixels
+        bus->SetPixelColor(l, RgbwColor(0, 0, 0, 0));
       }
     }
   } else {
@@ -425,9 +427,7 @@ uint32_t WS2812FX::getColor(void) {
 
 uint32_t WS2812FX::getPixelColor(uint16_t i)
 {
-  if (reverseMode) i = _length- 1 -i;
-  if (IS_REVERSE)   i = SEGMENT.stop -1 -i + SEGMENT.start; //reverse just individual segment
-  if (_skipFirstMode) i += LED_SKIP_AMOUNT;
+  i = realPixelIndex(i) + (_skipFirstMode ? LED_SKIP_AMOUNT : 0);
   if (_cronixieMode)
   {
     if(i>6)return 0;
@@ -476,10 +476,10 @@ uint32_t WS2812FX::getLastShow(void) {
   return _lastShow;
 }
 
-void WS2812FX::setSegment(uint8_t n, uint16_t i1, uint16_t i2, uint8_t grouping) {
+void WS2812FX::setSegment(uint8_t n, uint16_t start, uint16_t length, uint8_t grouping, uint8_t disableNLeds) {
   if (n >= MAX_NUM_SEGMENTS) return;
   Segment& seg = _segments[n];
-  if (seg.start == i1 && seg.stop == i2 && seg.grouping == grouping) return;
+  if (seg.start == start && seg.rawLength == length && seg.grouping == grouping && seg.disableNLeds == seg.disableNLeds) return;
   if (seg.isActive() && modeUsesLock(seg.mode))
   {
     _modeUsesLock = false;
@@ -487,16 +487,19 @@ void WS2812FX::setSegment(uint8_t n, uint16_t i1, uint16_t i2, uint8_t grouping)
     _modeUsesLock = true;
   }
   _segment_index = n; fill(0); //turn old segment range off
-  if (i2 <= i1) //disable segment
-  {
-    seg.stop = 0; return;
+
+  seg.rawLength = min(_length - start, length);
+  seg.disableNLeds = disableNLeds;
+  seg.grouping = grouping;
+  seg.start = start;
+  uint16_t ledGroup = seg.ledGroup();
+  seg.stop = (seg.rawLength - seg.start + ledGroup -1) / ledGroup + seg.start;
+  if (seg.start >= seg.stop) {
+    seg.stop = 0;
   }
-  if (grouping > 0) seg.grouping = grouping;
-  if (i1 < _length) seg.start = i1;
-  uint16_t maxStop = (_length - seg.start) / seg.grouping;
-  seg.stop = i2;
-  if (i2 > maxStop) seg.stop = maxStop;
-  _segment_runtimes[n].reset();
+  else {
+    _segment_runtimes[n].reset();
+  }
 }
 
 void WS2812FX::resetSegments() {
@@ -508,8 +511,10 @@ void WS2812FX::resetSegments() {
   _segments[0].start = 0;
   _segments[0].speed = DEFAULT_SPEED;
   _segments[0].stop = usableLeds();
+  _segments[0].rawLength = _length;
   _segments[0].setOption(0, 1); //select
   _segments[0].grouping = _grouping;
+  _segments[0].disableNLeds = _disableNLeds;
 }
 
 void WS2812FX::setIndividual(uint16_t i, uint32_t col)
