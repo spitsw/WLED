@@ -51,10 +51,10 @@ bool deserializeState(JsonObject root)
     if (id < strip.getMaxSegments())
     {
       WS2812FX::Segment& seg = strip.getSegment(id);
-      uint16_t start = elem["start"] | seg.start;
-      int len = elem["len"] | seg.rawLength;
+      uint16_t start = elem.containsKey("start") ? elem["start"] : seg.start;
+      int len = elem.containsKey("len") ? elem["len"] : seg.rawLength;
       uint8_t grouping = max(1, elem["grp"] | seg.grouping);
-      uint8_t disableNLeds = elem["dnl"] | seg.disableNLeds;
+      uint8_t disableNLeds = elem.containsKey("dnl") ? elem["dnl"] : seg.disableNLeds;
 
       strip.setSegment(id, start, len, grouping, disableNLeds);
 

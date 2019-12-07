@@ -479,7 +479,7 @@ uint32_t WS2812FX::getLastShow(void) {
 void WS2812FX::setSegment(uint8_t n, uint16_t start, uint16_t length, uint8_t grouping, uint8_t disableNLeds) {
   if (n >= MAX_NUM_SEGMENTS) return;
   Segment& seg = _segments[n];
-  if (seg.start == start && seg.rawLength == length && seg.grouping == grouping && seg.disableNLeds == seg.disableNLeds) return;
+  if (seg.start == start && seg.rawLength == length && seg.grouping == grouping && seg.disableNLeds == disableNLeds) return;
   if (seg.isActive() && modeUsesLock(seg.mode))
   {
     _modeUsesLock = false;
